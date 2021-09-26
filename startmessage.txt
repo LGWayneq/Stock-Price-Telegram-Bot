@@ -1,0 +1,3 @@
+Hi, I am Stock Price Bot! My functions are listed below:
+/getprice to get current stock price. 
+/setalerts to set whether to receive alerts.
