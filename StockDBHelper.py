@@ -6,7 +6,7 @@ class DBHelper():
         self.conn = sqlite3.connect(dbname, check_same_thread = False)
     
     def createTable(self):
-        cmd = "CREATE TABLE IF NOT EXISTS alerts (owner_id INTEGER PRIMARY KEY, alert BOOLEAN)"
+        cmd = "CREATE TABLE IF NOT EXISTS alerts (owner_id INTEGER PRIMARY KEY, alert INTEGER)"
         cmd2 = "CREATE TABLE IF NOT EXISTS pastTickers (owner_id INTEGER PRIMARY KEY, first_ticker TEXT, second_ticker TEXT, last_ticker TEXT)"
         self.conn.execute(cmd)
         self.conn.execute(cmd2)
@@ -21,18 +21,22 @@ class DBHelper():
     
     def getAllAlerts(self):
         cmd = "SELECT owner_id FROM alerts WHERE alert = (?)"
-        arg = (1,)
-        alerts = [x[0] for x in self.conn.execute(cmd, arg)]
+        alerts = {}
+        alerts[60] = [x[0] for x in self.conn.execute(cmd, (60,))]
+        alerts[900] = [x[0] for x in self.conn.execute(cmd, (900,))]        
+        alerts[1800] = [x[0] for x in self.conn.execute(cmd, (1800,))]        
+        alerts[3600] = [x[0] for x in self.conn.execute(cmd, (3600,))]        
+        alerts[999999] = [x[0] for x in self.conn.execute(cmd, (999999,))]        
         return alerts
     
-    def setAlerts(self, owner, alert_bool):
+    def setAlerts(self, owner, alert_time):
         try:
             ownerid = [x[0] for x in self.conn.execute("SELECT owner_id FROM alerts WHERE owner_id = (?)", (owner,))][0]
             cmd = "UPDATE alerts SET alert = (?) WHERE owner_id = (?)"
-            arg = (alert_bool, owner)
+            arg = (alert_time, owner)
         except:
             cmd = "INSERT INTO alerts VALUES ((?),(?))"
-            arg = (owner, alert_bool)
+            arg = (owner, alert_time)
         self.conn.execute(cmd, arg)
         self.conn.commit()
     

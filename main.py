@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 #availablePorts = ["443","80","88","8443"]
 #PORT = int(os.environ.get('PORT', '443'))
 
-commandslist = ["/getprice", "/setalerts"]
+commandslist = ["/getprice", "/setalerts", "/checkalerts"]
 with open("startmessage.txt", "r") as startfile:
     startmessage = startfile.read()
     startfile.close()
@@ -62,15 +62,41 @@ def set_alert_start(update, context):
     
 def set_alert_main(update, context):
     chatid = update.message.chat_id
-    choice = update.message.text
-    if choice == "On":
-        db.setAlerts(chatid, True)
-        bot.send_message(chat_id = chatid, text = "Alerts set to On", reply_markup = createKeyboard(commandslist))
-    elif choice == "Off":
-        db.setAlerts(chatid, False)
+    choice = update.message.text.lower()
+    if choice == "on":
+        bot.send_message(chat_id = chatid, text = "Select alerts timing", reply_markup = createKeyboard(["1 min", "15 min", "30 min", "1 hour", "Only market open & close"]))
+        return 2
+    elif choice == "off":
+        db.setAlerts(chatid, 0)
         bot.send_message(chat_id = chatid, text = "Alerts set to Off", reply_markup = createKeyboard(commandslist))
-    elif choice == "Cancel":
+    elif choice == "cancel":
         bot.send_message(chat_id = chatid, text = "Alerts choice selection cancelled", reply_markup = createKeyboard(commandslist))
+    else:
+        bot.send_message(chat_id = chatid, text = "Choice does not exist. Please try again.", reply_markup = createKeyboard(['On','Off','Cancel']))
+        return 1
+    return ConversationHandler.END
+
+def set_alert_on(update, context):
+    chatid = update.message.chat_id
+    choice = update.message.text
+    if choice == "1 min":
+        db.setAlerts(chatid, 60)
+        bot.send_message(chat_id = chatid, text = "Alerts set to every 1 min", reply_markup = createKeyboard(commandslist))
+    elif choice == "15 min":
+        db.setAlerts(chatid, 900)
+        bot.send_message(chat_id = chatid, text = "Alerts set to every 15 min", reply_markup = createKeyboard(commandslist))
+    elif choice == "30 min":
+        db.setAlerts(chatid, 1800)
+        bot.send_message(chat_id = chatid, text = "Alerts set to every 30 min", reply_markup = createKeyboard(commandslist))
+    elif choice == "1 hour":
+        db.setAlerts(chatid, 3600)
+        bot.send_message(chat_id = chatid, text = "Alerts set to every 1 hour", reply_markup = createKeyboard(commandslist))    
+    elif choice == "Only market open & close":
+        db.setAlerts(chatid, 999999)
+        bot.send_message(chat_id = chatid, text = "Alerts set to only market open & close", reply_markup = createKeyboard(commandslist))
+    else:
+        bot.send_message(chat_id = chatid, text = "Choice does not exist. Please try again.", reply_markup = createKeyboard(['On','Off','Cancel']))
+        return 2
     return ConversationHandler.END
         
 def set_alert_fallback(update, context):
@@ -79,18 +105,12 @@ def set_alert_fallback(update, context):
     bot.send_message(chat_id = chatid, text = "Choice of '{}' does not exist. Please try again.".format(choice), reply_markup = createKeyboard(['On','Off','Cancel']))
     return 1    
 
-def set_alert_cancel(update, context):
-    chatid = update.message.chat_id
-    alert_status = db.checkAlerts(chatid)
-    if alert_status == 1:
-        alert_status = True
-    else:
-        alert_status = False
-    bot.send_message(chat_id = chatid, text = "Set alert cancelled.\nAlerts will remain as {}".format(alert_status), reply_markup = createKeyboard(commandslist))
-    return ConversationHandler.END
-
-def alert_daily(context: CallbackContext):
-    user_list = db.getAllAlerts()
+def alert_time(context: CallbackContext):
+    try:
+        interval = context.job.interval
+        user_list = db.getAllAlerts()[interval]
+    except:
+        user_list = db.getAllAlerts()[999999]
     for user in user_list:
         ticker_list = db.getPastTickers(user)
         full_message = ""
@@ -98,7 +118,20 @@ def alert_daily(context: CallbackContext):
             response = urllib.request.urlopen(baseurl.format(ticker))
             price = json.load(response)["chart"]["result"][0]["meta"]["regularMarketPrice"]    
             full_message = full_message + "{}:  {}\n".format(ticker, price)
-        bot.send_message(chat_id = user, text = full_message ,reply_markup = createKeyboard(commandslist))
+        bot.send_message(chat_id = user, text = full_message ,reply_markup = createKeyboard(commandslist))    
+
+def check_alerts(update, context):
+    chatid = update.message.chat_id
+    try:
+        current_alerts = db.checkAlerts(chatid)
+        if current_alerts == 60: current_alerts = "1 min"
+        elif current_alerts == 900: current_alerts = "15 min"
+        elif current_alerts == 1800: current_alerts = "30 min"
+        elif current_alerts == 3600: current_alerts = "1h"
+        elif current_alerts == 999999: current_alerts = "market open & close"
+        bot.send_message(chat_id = chatid, text = "Alerts currently set to: {}".format(current_alerts), reply_markup = createKeyboard(commandslist))
+    except:
+        bot.send_message(chat_id = chatid, text = "You have not set any alerts", reply_markup = createKeyboard(commandslist))
     
 
 def error(update, context):
@@ -131,25 +164,32 @@ def main():
     job = updater.job_queue
 
     dp.add_handler(CommandHandler(["start","help"], start))
-    
-    setAlertConvHandler = ConversationHandler(
-        entry_points=[CommandHandler('setalerts', set_alert_start)],
-        states = {1: [MessageHandler(Filters.regex(r'^(On|Off|Cancel)?'), set_alert_main)]},
-        fallbacks = [CommandHandler('cancel', set_alert_cancel),
-                     MessageHandler(Filters.text, set_alert_fallback)]
-    )
+    dp.add_handler(CommandHandler("checkalerts", check_alerts))
     
     getPriceConvHandler = ConversationHandler(
         entry_points=[CommandHandler('getprice', get_price_start)],
         states = {1: [MessageHandler(Filters.text, set_ticker)]},
-        fallbacks = [CommandHandler('cancel', get_price_cancel)]
-    )
-    
+        fallbacks = [CommandHandler('cancel', get_price_cancel)],
+        allow_reentry = True,
+        conversation_timeout = 600)
     dp.add_handler(getPriceConvHandler)
+    
+    
+    setAlertConvHandler = ConversationHandler(
+        entry_points=[CommandHandler('setalerts', set_alert_start)],
+        states = {1: [MessageHandler(Filters.text, set_alert_main)],
+                  2: [MessageHandler(Filters.text, set_alert_on)]},
+        fallbacks = [MessageHandler(Filters.text, set_alert_fallback)],
+        allow_reentry = True,
+        conversation_timeout = 600)    
     dp.add_handler(setAlertConvHandler)
     
-    job.run_daily(alert_daily, days = (0,1,2,3,4), time = datetime.time(hour = 13, minute = 30, second = 10)) #alert for market, time in UTC+0
-    job.run_daily(alert_daily, days = (0,1,2,3,4), time = datetime.time(hour = 19, minute = 30, second = 10))  #alert for market close, time in UTC+0
+    job.run_daily(alert_time, days = (0,1,2,3,4), time = datetime.time(hour = 13, minute = 30, second = 10)) #alert for market open, time in UTC+0
+    job.run_daily(alert_time, days = (0,1,2,3,4), time = datetime.time(hour = 19, minute = 30, second = 10)) #alert for market close, time in UTC+0
+    job.run_repeating(alert_time, interval = 60)
+    job.run_repeating(alert_time, interval = 900)
+    job.run_repeating(alert_time, interval = 1800)
+    job.run_repeating(alert_time, interval = 3600)
     
     # log all errors
     dp.add_error_handler(error)
